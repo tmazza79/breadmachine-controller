@@ -1,0 +1,491 @@
+[
+  {
+    "id": "brf01",
+    "type": "tab",
+    "label": "Macchina del Pane",
+    "disabled": false,
+    "info": ""
+  },
+  {
+    "id": "bdt01",
+    "type": "ui_tab",
+    "name": "Macchina del Pane",
+    "icon": "home",
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "bdg01",
+    "type": "ui_group",
+    "name": "Macchina del Pane",
+    "tab": "bdt01",
+    "order": 1,
+    "disp": true,
+    "width": "6",
+    "collapse": false
+  },
+  {
+    "id": "br_ti",
+    "type": "ui_text_input",
+    "z": "brf01",
+    "name": "Orario target",
+    "label": "Pronto alle (HH:MM)",
+    "tooltip": "",
+    "group": "bdg01",
+    "order": 1,
+    "width": "6",
+    "height": "1",
+    "passthru": true,
+    "mode": "text",
+    "delay": 300,
+    "topic": "target",
+    "sendOnBlur": true,
+    "className": "",
+    "wires": [
+      [
+        "br_fn_store"
+      ]
+    ]
+  },
+  {
+    "id": "br_fn_store",
+    "type": "function",
+    "z": "brf01",
+    "name": "Salva orario",
+    "func": "flow.set('targetTime', msg.payload);\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "br_sw_usb",
+    "type": "ui_switch",
+    "z": "brf01",
+    "name": "Power cycle USB",
+    "group": "bdg01",
+    "order": 2,
+    "width": "6",
+    "height": "1",
+    "label": "🔌 Power cycle USB (Pico)",
+    "tooltip": "Abilita il riavvio automatico del Pico via USB switch",
+    "onvalue": "true",
+    "onvalueType": "bool",
+    "offvalue": "false",
+    "offvalueType": "bool",
+    "onicon": "check",
+    "officon": "close",
+    "oncolor": "#4CAF50",
+    "offcolor": "#f44336",
+    "animate": false,
+    "className": "",
+    "wires": [
+      [
+        "br_fn_usb_toggle"
+      ]
+    ]
+  },
+  {
+    "id": "br_fn_usb_toggle",
+    "type": "function",
+    "z": "brf01",
+    "name": "Salva toggle USB",
+    "func": "flow.set('usbCycleEnabled', msg.payload);\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "br_btn1",
+    "type": "ui_button",
+    "z": "brf01",
+    "name": "Prog 7",
+    "group": "bdg01",
+    "order": 3,
+    "width": "6",
+    "height": "1",
+    "passthru": false,
+    "label": "🥣 Prog 7 — Impasto (ora)",
+    "tooltip": "Avvia il programma 7 immediatamente",
+    "color": "white",
+    "bgcolor": "#4CAF50",
+    "className": "",
+    "icon": "",
+    "payload": "",
+    "payloadType": "str",
+    "topic": "",
+    "topicType": "str",
+    "wires": [
+      [
+        "br_fn_btn1"
+      ]
+    ]
+  },
+  {
+    "id": "br_fn_btn1",
+    "type": "function",
+    "z": "brf01",
+    "name": "Btn1 immediato",
+    "func": "node.send([{payload: 'start:7:::'}, {payload: '✅ Programma 7 avviato'}]);",
+    "outputs": 2,
+    "noerr": 0,
+    "wires": [
+      [
+        "br_mqtt"
+      ],
+      [
+        "br_status"
+      ]
+    ]
+  },
+  {
+    "id": "br_btn2",
+    "type": "ui_button",
+    "z": "brf01",
+    "name": "Prog 1 programmato",
+    "group": "bdg01",
+    "order": 4,
+    "width": "6",
+    "height": "1",
+    "passthru": false,
+    "label": "🍞 Prog 1 — Pane (programmato)",
+    "tooltip": "Avvia Prog 1 (1250g scuro) all'orario impostato",
+    "color": "white",
+    "bgcolor": "#2196F3",
+    "className": "",
+    "icon": "",
+    "payload": "",
+    "payloadType": "str",
+    "topic": "",
+    "topicType": "str",
+    "wires": [
+      [
+        "br_fn_btn2"
+      ]
+    ]
+  },
+  {
+    "id": "br_fn_btn2",
+    "type": "function",
+    "z": "brf01",
+    "name": "Btn2 logica temporizzata",
+    "func": "function next3AM(from) {\n    var d = new Date(from);\n    d.setHours(3, 0, 0, 0);\n    if (d <= from) d.setDate(d.getDate() + 1);\n    return d;\n}\nfunction roundUpBreadDelay(minutes) {\n    if (minutes <= 0) return {minutes: 0, param: ''};\n    if (minutes <= 5) return {minutes: 5, param: '0'};\n    var n = Math.ceil((minutes - 5) / 10);\n    return {minutes: 5 + n * 10, param: String(n * 10)};\n}\nfunction schedulePowerCycle(delayMs, schedId) {\n    setTimeout(function() {\n        if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n        node.send([null, null, null, {payload: '{\"state_1\":\"off\"}'}]);\n        setTimeout(function() {\n            node.send([null, null, null, {payload: '{\"state_1\":\"on\"}'}]);\n        }, 5000);\n    }, delayMs);\n}\nvar target = flow.get('targetTime') || '';\nif (!target.match(/^\\d{1,2}:\\d{2}$/)) {\n    node.send([null, {payload: '⚠️ Imposta prima un orario valido (HH:MM)'}, null, null]);\n    return;\n}\nvar now = new Date();\nvar parts = target.split(':');\nvar th = parseInt(parts[0]), tm = parseInt(parts[1]);\nvar targetDate = new Date(now);\ntargetDate.setHours(th, tm, 0, 0);\nif (targetDate <= now) targetDate.setDate(targetDate.getDate() + 1);\n\nvar PROG1_MS = 196 * 60 * 1000;\nvar STOP_OFFSET_MS = 3 * 60 * 1000;\nvar nowTotalMin = now.getHours() * 60 + now.getMinutes();\nvar targetTotalMin = th * 60 + tm;\n\nif (targetDate - now < PROG1_MS) {\n    node.send([null, {payload: '⚠️ Tempo insufficiente (servono ≥3h16m)'}, null, null]);\n    return;\n}\nvar inCritical = nowTotalMin < 195 || nowTotalMin >= 1080;\nif (inCritical && targetTotalMin > 1079) {\n    node.send([null, {payload: '⚠️ Orario dopo le 17:59 non raggiungibile nella finestra di reset delle 3:00'}, null, null]);\n    return;\n}\n\nvar three = next3AM(now);\nvar plannedSendMs = targetDate.getTime() - PROG1_MS;\nvar sendMs = plannedSendMs;\nvar delayParam = '';\nvar rescue = false;\n\nif (plannedSendMs >= three.getTime()) {\n    var cutoff = new Date(three.getTime() - 60000);\n    var toSaveMin = Math.ceil((plannedSendMs - cutoff.getTime()) / 60000);\n    var bd = roundUpBreadDelay(toSaveMin);\n    if (bd.minutes > 704) {\n        node.send([null, {payload: '⚠️ Supera il ritardo massimo della macchina (704 min)'}, null, null]);\n        return;\n    }\n    sendMs = plannedSendMs - bd.minutes * 60000;\n    delayParam = bd.param;\n    rescue = true;\n}\n\nvar sleepMs = Math.max(0, sendMs - now.getTime());\nvar stopMs = targetDate.getTime() + STOP_OFFSET_MS;\nvar stopDelayMs = stopMs - now.getTime();\nvar cmd = 'start:1:1250g:dark:' + delayParam;\nvar sendAt = new Date(sendMs).toTimeString().slice(0, 5);\nvar stopAt = new Date(stopMs).toTimeString().slice(0, 5);\nvar usbEnabled = flow.get('usbCycleEnabled') || false;\n\nflow.set('pendingCancelled', false);\nvar schedId = Date.now();\nflow.set('pendingSchedId', schedId);\nflow.set('pendingCmd', cmd);\nflow.set('pendingSendMs', sendMs);\n\nsetTimeout(function() {\n    if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n    flow.set('pendingSendMs', null);\n    flow.set('pendingCmd', null);\n    var note = rescue ? ' ⚠️ Stop auto via file (reset 3:00)' : (' — ⏳ Stop alle ' + stopAt);\n    node.send([{payload: cmd}, {payload: '✅ Inviato: ' + cmd + note}, null, null]);\n}, sleepMs);\n\nif (!rescue) {\n    flow.set('pendingStopMs', stopMs);\n    if (usbEnabled) {\n        schedulePowerCycle(Math.max(0, sendMs - 60000 - now.getTime()), schedId);\n        schedulePowerCycle(Math.max(0, stopMs - 60000 - now.getTime()), schedId);\n    }\n    setTimeout(function() {\n        if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n        flow.set('pendingStopMs', null);\n        node.send([{payload: 'stop'}, {payload: '⛔ Stop automatico inviato — buon appetito!'}, {payload: JSON.stringify({action:'stop',at:0})}, null]);\n    }, stopDelayMs);\n}\n\n// FIX: always write stop file, even in rescue mode\nvar fileMsg = {payload: JSON.stringify({action: 'stop', at: stopMs})};\nvar usbNote = (!rescue && usbEnabled) ? ' — 🔌 Power cycle attivo' : '';\nvar statusMsg = rescue\n    ? ('⏳ Invio \"' + cmd + '\" alle ' + sendAt + ' — Stop automatico alle ' + stopAt + ' (via file)')\n    : ('⏳ Invio \"' + cmd + '\" alle ' + sendAt + ' — Stop automatico alle ' + stopAt + usbNote);\nnode.send([null, {payload: statusMsg}, fileMsg, null]);\n",
+    "outputs": 4,
+    "noerr": 0,
+    "wires": [
+      [
+        "br_mqtt"
+      ],
+      [
+        "br_status"
+      ],
+      [
+        "br_file_out"
+      ],
+      [
+        "br_usb_mqtt"
+      ]
+    ]
+  },
+  {
+    "id": "br_btn3",
+    "type": "ui_button",
+    "z": "brf01",
+    "name": "Prog 7+1",
+    "group": "bdg01",
+    "order": 5,
+    "width": "6",
+    "height": "1",
+    "passthru": false,
+    "label": "🥣🍞 Prog 7 ora + Prog 1 programmato",
+    "tooltip": "Prog 7 subito, Prog 1 all'orario impostato",
+    "color": "white",
+    "bgcolor": "#FF9800",
+    "className": "",
+    "icon": "",
+    "payload": "",
+    "payloadType": "str",
+    "topic": "",
+    "topicType": "str",
+    "wires": [
+      [
+        "br_fn_btn3"
+      ]
+    ]
+  },
+  {
+    "id": "br_fn_btn3",
+    "type": "function",
+    "z": "brf01",
+    "name": "Btn3 logica temporizzata",
+    "func": "function next3AM(from) {\n    var d = new Date(from);\n    d.setHours(3, 0, 0, 0);\n    if (d <= from) d.setDate(d.getDate() + 1);\n    return d;\n}\nfunction roundUpBreadDelay(minutes) {\n    if (minutes <= 0) return {minutes: 0, param: ''};\n    if (minutes <= 5) return {minutes: 5, param: '0'};\n    var n = Math.ceil((minutes - 5) / 10);\n    return {minutes: 5 + n * 10, param: String(n * 10)};\n}\nfunction schedulePowerCycle(delayMs, schedId) {\n    setTimeout(function() {\n        if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n        node.send([null, null, null, {payload: '{\"state_1\":\"off\"}'}]);\n        setTimeout(function() {\n            node.send([null, null, null, {payload: '{\"state_1\":\"on\"}'}]);\n        }, 5000);\n    }, delayMs);\n}\nvar target = flow.get('targetTime') || '';\nif (!target.match(/^\\d{1,2}:\\d{2}$/)) {\n    node.send([null, {payload: '⚠️ Imposta prima un orario valido (HH:MM)'}, null, null]);\n    return;\n}\nvar now = new Date();\nvar parts = target.split(':');\nvar th = parseInt(parts[0]), tm = parseInt(parts[1]);\nvar targetDate = new Date(now);\ntargetDate.setHours(th, tm, 0, 0);\nif (targetDate <= now) targetDate.setDate(targetDate.getDate() + 1);\n\nvar PROG1_MS = 196 * 60 * 1000;\nvar PROG7_MS = 15 * 60 * 1000;\nvar STOP_OFFSET_MS = 3 * 60 * 1000;\nvar nowTotalMin = now.getHours() * 60 + now.getMinutes();\nvar targetTotalMin = th * 60 + tm;\n\nif (targetDate - now < PROG1_MS + PROG7_MS) {\n    node.send([null, {payload: '⚠️ Tempo insufficiente (servono ≥3h31m per Prog 7 + Prog 1)'}, null, null]);\n    return;\n}\nvar inCritical = nowTotalMin < 195 || nowTotalMin >= 1080;\nif (inCritical && targetTotalMin > 1079) {\n    node.send([null, {payload: '⚠️ Orario dopo le 17:59 non raggiungibile nella finestra di reset delle 3:00'}, null, null]);\n    return;\n}\n\nvar three = next3AM(now);\nvar plannedSendMs = targetDate.getTime() - PROG1_MS;\nvar sendMs = plannedSendMs;\nvar delayParam = '';\nvar rescue = false;\n\nif (plannedSendMs >= three.getTime()) {\n    var cutoff = new Date(three.getTime() - 60000);\n    var toSaveMin = Math.ceil((plannedSendMs - cutoff.getTime()) / 60000);\n    var bd = roundUpBreadDelay(toSaveMin);\n    if (bd.minutes > 704) {\n        node.send([null, {payload: '⚠️ Supera il ritardo massimo della macchina (704 min)'}, null, null]);\n        return;\n    }\n    sendMs = plannedSendMs - bd.minutes * 60000;\n    delayParam = bd.param;\n    rescue = true;\n}\n\nvar sleepMs = Math.max(0, sendMs - now.getTime());\nvar stopMs = targetDate.getTime() + STOP_OFFSET_MS;\nvar stopDelayMs = stopMs - now.getTime();\nvar cmd = 'start:1:1250g:dark:' + delayParam;\nvar sendAt = new Date(sendMs).toTimeString().slice(0, 5);\nvar stopAt = new Date(stopMs).toTimeString().slice(0, 5);\nvar usbEnabled = flow.get('usbCycleEnabled') || false;\n\nflow.set('pendingCancelled', false);\nvar schedId = Date.now();\nflow.set('pendingSchedId', schedId);\nflow.set('pendingCmd', cmd);\nflow.set('pendingSendMs', sendMs);\n\nnode.send([{payload: 'start:7:::'}, {payload: '✅ Prog 7 avviato — ⏳ Prog 1 alle ' + sendAt}, null, null]);\n\nsetTimeout(function() {\n    if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n    flow.set('pendingSendMs', null);\n    flow.set('pendingCmd', null);\n    var note = rescue ? ' ⚠️ Stop auto via file (reset 3:00)' : (' — ⏳ Stop alle ' + stopAt);\n    node.send([{payload: cmd}, {payload: '✅ Inviato: ' + cmd + note}, null, null]);\n}, sleepMs);\n\nif (!rescue) {\n    flow.set('pendingStopMs', stopMs);\n    if (usbEnabled) {\n        schedulePowerCycle(Math.max(0, sendMs - 60000 - now.getTime()), schedId);\n        schedulePowerCycle(Math.max(0, stopMs - 60000 - now.getTime()), schedId);\n    }\n    setTimeout(function() {\n        if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n        flow.set('pendingStopMs', null);\n        node.send([{payload: 'stop'}, {payload: '⛔ Stop automatico inviato — buon appetito!'}, {payload: JSON.stringify({action:'stop',at:0})}, null]);\n    }, stopDelayMs);\n}\n\n// FIX: always write stop file, even in rescue mode\nvar fileMsg = {payload: JSON.stringify({action: 'stop', at: stopMs})};\nnode.send([null, null, fileMsg, null]);\n",
+    "outputs": 4,
+    "noerr": 0,
+    "wires": [
+      [
+        "br_mqtt"
+      ],
+      [
+        "br_status"
+      ],
+      [
+        "br_file_out"
+      ],
+      [
+        "br_usb_mqtt"
+      ]
+    ]
+  },
+  {
+    "id": "br_btn_stop",
+    "type": "ui_button",
+    "z": "brf01",
+    "name": "Ferma",
+    "group": "bdg01",
+    "order": 6,
+    "width": "6",
+    "height": "1",
+    "passthru": false,
+    "label": "⛔ Ferma macchina",
+    "tooltip": "Invia stop alla macchina del pane",
+    "color": "white",
+    "bgcolor": "#f44336",
+    "className": "",
+    "icon": "",
+    "payload": "",
+    "payloadType": "str",
+    "topic": "",
+    "topicType": "str",
+    "wires": [
+      [
+        "br_fn_stop"
+      ]
+    ]
+  },
+  {
+    "id": "br_fn_stop",
+    "type": "function",
+    "z": "brf01",
+    "name": "Logica stop",
+    "func": "node.send([{payload: 'stop'}, {payload: '⛔ Stop inviato alla macchina del pane'}, {payload: '{}'}]);",
+    "outputs": 3,
+    "noerr": 0,
+    "wires": [
+      [
+        "br_mqtt"
+      ],
+      [
+        "br_status"
+      ],
+      [
+        "br_file_out"
+      ]
+    ]
+  },
+  {
+    "id": "br_btn_kill",
+    "type": "ui_button",
+    "z": "brf01",
+    "name": "Annulla",
+    "group": "bdg01",
+    "order": 7,
+    "width": "6",
+    "height": "1",
+    "passthru": false,
+    "label": "🚫 Annulla comando in attesa",
+    "tooltip": "Annulla qualsiasi comando schedulato",
+    "color": "white",
+    "bgcolor": "#9C27B0",
+    "className": "",
+    "icon": "",
+    "payload": "",
+    "payloadType": "str",
+    "topic": "",
+    "topicType": "str",
+    "wires": [
+      [
+        "br_fn_kill"
+      ]
+    ]
+  },
+  {
+    "id": "br_fn_kill",
+    "type": "function",
+    "z": "brf01",
+    "name": "Logica annulla",
+    "func": "flow.set('pendingCancelled', true);\nflow.set('pendingSendMs', null);\nflow.set('pendingCmd', null);\nflow.set('pendingStopMs', null);\nnode.send([null, {payload: '🚫 Comando in attesa annullato'}, {payload: '{}'}]);",
+    "outputs": 3,
+    "noerr": 0,
+    "wires": [
+      [],
+      [
+        "br_status"
+      ],
+      [
+        "br_file_out"
+      ]
+    ]
+  },
+  {
+    "id": "br_mqtt",
+    "type": "mqtt out",
+    "z": "brf01",
+    "name": "breadmachine/cmd",
+    "topic": "breadmachine/cmd",
+    "qos": "0",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "3f78fb433db81a83",
+    "wires": []
+  },
+  {
+    "id": "br_usb_mqtt",
+    "type": "mqtt out",
+    "z": "brf01",
+    "name": "usb_switch_01/set",
+    "topic": "zigbee2mqtt/usb_switch_01/set",
+    "qos": "0",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "82cf2ea3475e78da",
+    "wires": []
+  },
+  {
+    "id": "br_status",
+    "type": "ui_text",
+    "z": "brf01",
+    "group": "bdg01",
+    "order": 8,
+    "width": "6",
+    "height": "2",
+    "name": "Stato",
+    "label": "Stato",
+    "format": "{{msg.payload}}",
+    "layout": "row-spread",
+    "className": "",
+    "wires": []
+  },
+  {
+    "id": "br_inj_cd",
+    "type": "inject",
+    "z": "brf01",
+    "name": "Tick conto alla rovescia",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "1",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "wires": [
+      [
+        "br_fn_cd"
+      ]
+    ]
+  },
+  {
+    "id": "br_fn_cd",
+    "type": "function",
+    "z": "brf01",
+    "name": "Aggiorna conto alla rovescia",
+    "func": "var sendMs = flow.get('pendingSendMs');\nvar stopMs = flow.get('pendingStopMs');\nvar now = Date.now();\nfunction fmt(ms) {\n    var rem = Math.max(0, ms - now);\n    var tot = Math.floor(rem / 1000);\n    var h = Math.floor(tot / 3600);\n    var m = Math.floor((tot % 3600) / 60);\n    var s = tot % 60;\n    return (h > 0 ? h + 'h ' : '') +\n           (m > 0 || h > 0 ? String(m).padStart(2,'0') + 'm ' : '') +\n           String(s).padStart(2,'0') + 's';\n}\nif (sendMs && sendMs > now) {\n    var cmd = flow.get('pendingCmd') || '';\n    return {payload: '⏳ Invio \"' + cmd + '\" tra ' + fmt(sendMs)};\n}\nif (stopMs && stopMs > now) {\n    return {payload: '⏳ Stop automatico tra ' + fmt(stopMs)};\n}\nreturn null;\n",
+    "outputs": 1,
+    "noerr": 0,
+    "wires": [
+      [
+        "br_status"
+      ]
+    ]
+  },
+  {
+    "id": "br_file_out",
+    "type": "file",
+    "z": "brf01",
+    "name": "Scrivi file stop",
+    "filename": "/home/pi/breadmachine_pending.json",
+    "filenameType": "str",
+    "appendNewline": false,
+    "createDir": true,
+    "overwriteFile": "true",
+    "encoding": "none",
+    "wires": []
+  },
+  {
+    "id": "br_inj_startup",
+    "type": "inject",
+    "z": "brf01",
+    "name": "Avvio (30s dopo boot)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 30,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "wires": [
+      [
+        "br_file_in"
+      ]
+    ]
+  },
+  {
+    "id": "br_file_in",
+    "type": "file in",
+    "z": "brf01",
+    "name": "Leggi file stop",
+    "filename": "/home/pi/breadmachine_pending.json",
+    "filenameType": "str",
+    "format": "utf8",
+    "chunk": false,
+    "sendError": false,
+    "encoding": "none",
+    "allProps": false,
+    "wires": [
+      [
+        "br_fn_startup"
+      ]
+    ]
+  },
+  {
+    "id": "br_fn_startup",
+    "type": "function",
+    "z": "brf01",
+    "name": "Controlla file all'avvio",
+    "func": "var content = msg.payload || '{}';\nvar data;\ntry { data = JSON.parse(content); } catch(e) { return null; }\nif (!data.action || !data.at) return null;\n\nvar now = Date.now();\nvar remaining = data.at - now;\nvar THIRTY_MIN = 30 * 60 * 1000;\n\nif (remaining > 0) {\n    flow.set('pendingCancelled', false);\n    var schedId = Date.now();\n    flow.set('pendingSchedId', schedId);\n    flow.set('pendingStopMs', data.at);\n    setTimeout(function() {\n        if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n        flow.set('pendingStopMs', null);\n        node.send([{payload: 'stop'}, {payload: '⛔ Stop automatico inviato (da file) — buon appetito!'}, {payload: '{}'}, null]);\n    }, remaining);\n    node.send([null, {payload: '⏳ Stop programmato trovato — invio alle ' + new Date(data.at).toTimeString().slice(0,5)}, null, null]);\n} else if (remaining > -THIRTY_MIN) {\n    node.send([{payload: 'stop'}, {payload: '⛔ Stop automatico inviato (in ritardo) — buon appetito!'}, {payload: '{}'}, null]);\n} else {\n    node.send([null, {payload: 'ℹ️ Stop programmato scaduto — ignorato'}, {payload: '{}'}, null]);\n}\n",
+    "outputs": 4,
+    "noerr": 0,
+    "wires": [
+      [
+        "br_mqtt"
+      ],
+      [
+        "br_status"
+      ],
+      [
+        "br_file_out"
+      ],
+      []
+    ]
+  }
+]

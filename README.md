@@ -40,7 +40,7 @@ Node-RED Dashboard  (Raspberry Pi)
     |  MQTT  breadmachine/cmd
     v
 Pico W
-    |  GPIO -> 470 ohm -> PC817C LED
+    |  GPIO -> 330 ohm -> PC817C LED
     v
 PC817C phototransistor in parallel with button contacts
     |
@@ -64,7 +64,7 @@ The two programs used are:
 | Raspberry Pi | 1 | Runs Node-RED + Mosquitto |
 | Raspberry Pi Pico W | 1 | MicroPython firmware |
 | PC817C optocoupler (DIP-4) | 6 | One per button |
-| Resistor 470 ohm | 6 | LED current limiting, Pico GPIO side |
+| Resistor 330 ohm | 6 | LED current limiting, Pico GPIO side |
 | Sub-D 9 female connector | 1 | On the PCB inside the enclosure |
 | Sub-D 9 male connector | 1 | On the cable going to the bread machine |
 | Perfboard | 1 | ~5 x 7 cm |
@@ -123,7 +123,7 @@ One PC817C per button. The LED side is driven by the Pico W GPIO; the phototrans
 ```
 Pico W GPIO (3.3 V)
        |
-     [470 ohm]
+     [330 ohm]
        |
    PC817C pin 1  (Anode)
    PC817C pin 2  (Cathode) -- GND (Pico)
@@ -135,7 +135,7 @@ Pico W GPIO (3.3 V)
 **Resistor calculation:**
 
 ```
-R = (3.3 V - 1.2 V) / 10 mA = 210 ohm  ->  use 470 ohm (conservative, ~4.5 mA)
+R = (3.3 V - 1.2 V) / 10 mA = 210 ohm  ->  330 ohm is fine as well
 ```
 
 The phototransistor switches the ~25-250 uA pull-up current of the machine's MCU, well within PC817C ratings.
@@ -158,7 +158,7 @@ The Pico W and optocoupler board are housed in a small plastic enclosure connect
 
 ![Enclosure interior](images/08_enclosure.jpg)
 
-*Inside the enclosure: Pico W (top), perfboard with 6x PC817C and 6x 470 ohm resistors (centre), Sub-D 9 female connector (bottom-left).*
+*Inside the enclosure: Pico W (top), perfboard with 6x PC817C and 6x 330 ohm resistors (centre), Sub-D 9 female connector (bottom-left).*
 
 ---
 

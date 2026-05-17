@@ -9,7 +9,7 @@ Remote control for an **ECG PCB 82120** bread machine via a Raspberry Pi, Node-R
 - Start baking programs remotely from a smartphone
 - Schedule bread to be **ready at a specific time** without manual intervention
 - Chain **Program 7 (Dough)** immediately followed by **Program 1 (Bread)** at a set time, without needing to be present when the dough program finishes
-- Automatically **stop the machine** when the bread is ready, disabling the one-hour keep-warm phase that would otherwise dry out the crust
+- Automatically **stop the machine** when the bread is ready, disabling the unnecessary one-hour keep-warm phase
 
 ---
 

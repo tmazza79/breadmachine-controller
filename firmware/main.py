@@ -138,20 +138,3 @@ while True:
             sleep(1)
             machine.reset()
 
-'''
-c=0
-while True:
-    client.check_msg()   # checks for pending messages, returns immediately if none
-    sleep(.5)
-    c+=1
-    if c%100==0:
-        c=1
-        year, month, day, hour, minute, second = get_current_time()
-        TIMEZONE_OFFSET = get_timezone_offset(year, month, day, hour)
-        hour = (hour + TIMEZONE_OFFSET) % 24
-        if hour == 3 and minute == 10:
-            print('reset')
-            sleep(1)
-            machine.reset()
-'''
-

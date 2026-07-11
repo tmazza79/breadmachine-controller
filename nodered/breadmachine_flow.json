@@ -60,12 +60,47 @@
     ]
   },
   {
+    "id": "br_rest",
+    "type": "ui_text_input",
+    "z": "brf01",
+    "name": "Tempo di riposo",
+    "label": "Tempo di riposo (min)",
+    "tooltip": "Riposo tra fine Prog 7 e inizio Prog 1",
+    "group": "bdg01",
+    "order": 2,
+    "width": "6",
+    "height": "1",
+    "passthru": true,
+    "mode": "number",
+    "delay": 300,
+    "topic": "rest",
+    "sendOnBlur": true,
+    "className": "",
+    "wires": [
+      [
+        "br_fn_store_rest"
+      ]
+    ]
+  },
+  {
+    "id": "br_fn_store_rest",
+    "type": "function",
+    "z": "brf01",
+    "name": "Salva riposo",
+    "func": "flow.set('restMinutes', msg.payload);\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "wires": [
+      []
+    ]
+  },
+  {
     "id": "br_sw_usb",
     "type": "ui_switch",
     "z": "brf01",
     "name": "Power cycle USB",
     "group": "bdg01",
-    "order": 2,
+    "order": 3,
     "width": "6",
     "height": "1",
     "label": "🔌 Power cycle USB (Pico)",
@@ -104,7 +139,7 @@
     "z": "brf01",
     "name": "Prog 7",
     "group": "bdg01",
-    "order": 3,
+    "order": 4,
     "width": "6",
     "height": "1",
     "passthru": false,
@@ -147,7 +182,7 @@
     "z": "brf01",
     "name": "Prog 1 programmato",
     "group": "bdg01",
-    "order": 4,
+    "order": 5,
     "width": "6",
     "height": "1",
     "passthru": false,
@@ -196,7 +231,7 @@
     "z": "brf01",
     "name": "Prog 7+1",
     "group": "bdg01",
-    "order": 5,
+    "order": 6,
     "width": "6",
     "height": "1",
     "passthru": false,
@@ -240,12 +275,61 @@
     ]
   },
   {
+    "id": "br_btn4",
+    "type": "ui_button",
+    "z": "brf01",
+    "name": "Prog 7 ritardato + 1",
+    "group": "bdg01",
+    "order": 7,
+    "width": "6",
+    "height": "1",
+    "passthru": false,
+    "label": "🥣⏱🍞 Prog 7 ritardato + Prog 1 programmato",
+    "tooltip": "Prog 7 programmato per lasciare il tempo di riposo, Prog 1 all'orario impostato",
+    "color": "white",
+    "bgcolor": "#795548",
+    "className": "",
+    "icon": "",
+    "payload": "",
+    "payloadType": "str",
+    "topic": "",
+    "topicType": "str",
+    "wires": [
+      [
+        "br_fn_btn4"
+      ]
+    ]
+  },
+  {
+    "id": "br_fn_btn4",
+    "type": "function",
+    "z": "brf01",
+    "name": "Btn4 logica riposo",
+    "func": "function schedulePowerCycle(delayMs, schedId) {\n    setTimeout(function() {\n        if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n        node.send([null, null, null, {payload: '{\"state_1\":\"off\"}'}]);\n        setTimeout(function() {\n            node.send([null, null, null, {payload: '{\"state_1\":\"on\"}'}]);\n        }, 5000);\n    }, delayMs);\n}\nfunction scheduleCmd(cmd, sendMs, schedId, usbEnabled) {\n    var delayMs = Math.max(0, sendMs - Date.now());\n    setTimeout(function() {\n        if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n        node.send([{payload: cmd}, {payload: '✅ Inviato: ' + cmd}, null, null]);\n    }, delayMs);\n    if (usbEnabled) {\n        schedulePowerCycle(Math.max(0, sendMs - 60000 - Date.now()), schedId);\n    }\n}\nvar target = flow.get('targetTime') || '';\nif (!target.match(/^\\d{1,2}:\\d{2}$/)) {\n    node.send([null, {payload: '⚠️ Imposta prima un orario valido (HH:MM)'}, null, null]);\n    return;\n}\nvar restMin = parseInt(flow.get('restMinutes') || '0');\nif (isNaN(restMin) || restMin < 0) {\n    node.send([null, {payload: '⚠️ Imposta un tempo di riposo valido (min)'}, null, null]);\n    return;\n}\nvar now = new Date();\nvar parts = target.split(':');\nvar th = parseInt(parts[0]), tm = parseInt(parts[1]);\nvar targetDate = new Date(now);\ntargetDate.setHours(th, tm, 0, 0);\nif (targetDate <= now) targetDate.setDate(targetDate.getDate() + 1);\n\nvar PROG1_MS = 196 * 60 * 1000;\nvar PROG7_MS = 15 * 60 * 1000;\nvar STOP_OFFSET_MS = 3 * 60 * 1000;\nvar restMs = restMin * 60 * 1000;\n\n// Validation: at least Prog 7 + Prog 1 must fit\nif (targetDate - now < PROG1_MS + PROG7_MS) {\n    node.send([null, {payload: '⚠️ Tempo insufficiente (servono ≥3h31m per Prog 7 + Prog 1)'}, null, null]);\n    return;\n}\n\nvar prog1StartMs = targetDate.getTime() - PROG1_MS;\nvar stopMs = targetDate.getTime() + STOP_OFFSET_MS;\nvar prog1At = new Date(prog1StartMs).toTimeString().slice(0, 5);\nvar stopAt = new Date(stopMs).toTimeString().slice(0, 5);\nvar cmd1 = 'start:1:1250g:dark:';\nvar cmd7 = 'start:7:::';\nvar usbEnabled = flow.get('usbCycleEnabled') || false;\n\n// Ideal prog 7 start time\nvar idealProg7StartMs = prog1StartMs - restMs - PROG7_MS;\nvar prog7StartMs;\nvar restWarning = '';\nvar actualRestMin = restMin;\n\nif (idealProg7StartMs < now.getTime()) {\n    // Not enough time: start prog 7 immediately, prog 1 stays at target\n    prog7StartMs = now.getTime();\n    var actualRestMs = prog1StartMs - now.getTime() - PROG7_MS;\n    actualRestMin = Math.max(0, Math.round(actualRestMs / 60000));\n    restWarning = ' ⚠️ Tempo di riposo effettivo ' + actualRestMin + ' min invece di ' + restMin + ' min';\n} else {\n    prog7StartMs = idealProg7StartMs;\n}\nvar prog7At = new Date(prog7StartMs).toTimeString().slice(0, 5);\n\nflow.set('pendingCancelled', false);\nvar schedId = Date.now();\nflow.set('pendingSchedId', schedId);\nflow.set('pendingCmd', cmd1);\nflow.set('pendingSendMs', prog1StartMs);\nflow.set('pendingStopMs', stopMs);\nflow.set('pendingProg7Ms', null);\nflow.set('pendingProg7Cmd', null);\n\n// Schedule prog 7 (immediate if in the past, delayed otherwise)\nif (prog7StartMs <= now.getTime() + 1000) {\n    node.send([{payload: cmd7}, {payload: '✅ Prog 7 avviato' + restWarning}, null, null]);\n} else {\n    flow.set('pendingProg7Ms', prog7StartMs);\n    flow.set('pendingProg7Cmd', cmd7);\n    var prog7Delay = prog7StartMs - now.getTime();\n    setTimeout(function() {\n        if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n        flow.set('pendingProg7Ms', null);\n        flow.set('pendingProg7Cmd', null);\n        node.send([{payload: cmd7}, {payload: '✅ Inviato: ' + cmd7}, null, null]);\n    }, prog7Delay);\n    if (usbEnabled) {\n        schedulePowerCycle(Math.max(0, prog7StartMs - 60000 - now.getTime()), schedId);\n    }\n}\n\n// Schedule prog 1\nscheduleCmd(cmd1, prog1StartMs, schedId, usbEnabled);\n\n// Schedule stop\nsetTimeout(function() {\n    if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n    flow.set('pendingStopMs', null);\n    node.send([{payload: 'stop'}, {payload: '⛔ Stop automatico inviato — buon appetito!'}, {payload: '{\"events\":[]}'}, null]);\n}, stopMs - now.getTime());\nif (usbEnabled) {\n    schedulePowerCycle(Math.max(0, stopMs - 60000 - now.getTime()), schedId);\n}\n\n// Build events for file\nvar events = [];\nif (prog7StartMs > now.getTime() + 1000) {\n    events.push({cmd: cmd7, at: prog7StartMs});\n}\nevents.push({cmd: cmd1, at: prog1StartMs});\nevents.push({cmd: 'stop', at: stopMs});\n\nvar fileMsg = {payload: JSON.stringify({events: events})};\nvar usbNote = usbEnabled ? ' — 🔌 Power cycle attivo' : '';\nvar statusMsg;\nif (prog7StartMs <= now.getTime() + 1000) {\n    statusMsg = '✅ Prog 7 ora' + restWarning + ' — ⏳ Prog 1 alle ' + prog1At + ' — Stop alle ' + stopAt + usbNote;\n} else {\n    statusMsg = '⏳ Prog 7 alle ' + prog7At + ' — riposo ' + actualRestMin + ' min — Prog 1 alle ' + prog1At + ' — Stop alle ' + stopAt + usbNote;\n}\nnode.send([null, {payload: statusMsg}, fileMsg, null]);\n",
+    "outputs": 4,
+    "noerr": 0,
+    "wires": [
+      [
+        "br_mqtt"
+      ],
+      [
+        "br_status"
+      ],
+      [
+        "br_file_out"
+      ],
+      [
+        "br_usb_mqtt"
+      ]
+    ]
+  },
+  {
     "id": "br_btn_stop",
     "type": "ui_button",
     "z": "brf01",
     "name": "Ferma",
     "group": "bdg01",
-    "order": 6,
+    "order": 8,
     "width": "6",
     "height": "1",
     "passthru": false,
@@ -291,7 +375,7 @@
     "z": "brf01",
     "name": "Annulla",
     "group": "bdg01",
-    "order": 7,
+    "order": 9,
     "width": "6",
     "height": "1",
     "passthru": false,
@@ -316,7 +400,7 @@
     "type": "function",
     "z": "brf01",
     "name": "Logica annulla",
-    "func": "flow.set('pendingCancelled', true);\nflow.set('pendingSendMs', null);\nflow.set('pendingCmd', null);\nflow.set('pendingStopMs', null);\nnode.send([null, {payload: '🚫 Comando in attesa annullato'}, {payload: '{\"events\":[]}'}]);",
+    "func": "flow.set('pendingCancelled', true);\nflow.set('pendingSendMs', null);\nflow.set('pendingCmd', null);\nflow.set('pendingStopMs', null);\nflow.set('pendingProg7Ms', null);\nflow.set('pendingProg7Cmd', null);\nnode.send([null, {payload: '🚫 Comando in attesa annullato'}, {payload: '{\"events\":[]}'}]);",
     "outputs": 3,
     "noerr": 0,
     "wires": [
@@ -366,7 +450,7 @@
     "type": "ui_text",
     "z": "brf01",
     "group": "bdg01",
-    "order": 8,
+    "order": 10,
     "width": "6",
     "height": "2",
     "name": "Stato",
@@ -404,7 +488,7 @@
     "type": "function",
     "z": "brf01",
     "name": "Aggiorna conto alla rovescia",
-    "func": "var sendMs = flow.get('pendingSendMs');\nvar stopMs = flow.get('pendingStopMs');\nvar now = Date.now();\nfunction fmt(ms) {\n    var rem = Math.max(0, ms - now);\n    var tot = Math.floor(rem / 1000);\n    var h = Math.floor(tot / 3600);\n    var m = Math.floor((tot % 3600) / 60);\n    var s = tot % 60;\n    return (h > 0 ? h + 'h ' : '') +\n           (m > 0 || h > 0 ? String(m).padStart(2,'0') + 'm ' : '') +\n           String(s).padStart(2,'0') + 's';\n}\nif (sendMs && sendMs > now) {\n    var cmd = flow.get('pendingCmd') || '';\n    return {payload: '⏳ Invio \"' + cmd + '\" tra ' + fmt(sendMs)};\n}\nif (stopMs && stopMs > now) {\n    return {payload: '⏳ Stop automatico tra ' + fmt(stopMs)};\n}\nreturn null;\n",
+    "func": "var prog7Ms = flow.get('pendingProg7Ms');\nvar sendMs = flow.get('pendingSendMs');\nvar stopMs = flow.get('pendingStopMs');\nvar now = Date.now();\nfunction fmt(ms) {\n    var rem = Math.max(0, ms - now);\n    var tot = Math.floor(rem / 1000);\n    var h = Math.floor(tot / 3600);\n    var m = Math.floor((tot % 3600) / 60);\n    var s = tot % 60;\n    return (h > 0 ? h + 'h ' : '') +\n           (m > 0 || h > 0 ? String(m).padStart(2,'0') + 'm ' : '') +\n           String(s).padStart(2,'0') + 's';\n}\nif (prog7Ms && prog7Ms > now) {\n    var cmd7 = flow.get('pendingProg7Cmd') || '';\n    return {payload: '⏳ Invio \"' + cmd7 + '\" tra ' + fmt(prog7Ms)};\n}\nif (sendMs && sendMs > now) {\n    var cmd = flow.get('pendingCmd') || '';\n    return {payload: '⏳ Invio \"' + cmd + '\" tra ' + fmt(sendMs)};\n}\nif (stopMs && stopMs > now) {\n    return {payload: '⏳ Stop automatico tra ' + fmt(stopMs)};\n}\nreturn null;\n",
     "outputs": 1,
     "noerr": 0,
     "wires": [
@@ -472,7 +556,7 @@
     "type": "function",
     "z": "brf01",
     "name": "Controlla file all'avvio",
-    "func": "var content = msg.payload || '{}';\nvar data;\ntry { data = JSON.parse(content); } catch(e) { return null; }\nif (!data.events || !Array.isArray(data.events) || data.events.length === 0) return null;\n\nvar now = Date.now();\nvar FIVE_MIN = 5 * 60 * 1000;\nvar usbEnabled = flow.get('usbCycleEnabled') || false;\n\nflow.set('pendingCancelled', false);\nvar schedId = Date.now();\nflow.set('pendingSchedId', schedId);\n\nvar pendingStart = null, pendingStop = null;\nvar recovered = [];\nvar lateWarnings = [];\nvar expired = [];\n\nfor (var i = 0; i < data.events.length; i++) {\n    var ev = data.events[i];\n    if (!ev.cmd || !ev.at) continue;\n    var remaining = ev.at - now;\n    if (remaining > 0) {\n        (function(ev, remaining) {\n            setTimeout(function() {\n                if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n                if (ev.cmd === 'stop') flow.set('pendingStopMs', null);\n                else { flow.set('pendingSendMs', null); flow.set('pendingCmd', null); }\n                node.send([{payload: ev.cmd}, {payload: '✅ Inviato (da file): ' + ev.cmd}, null, null]);\n            }, remaining);\n        })(ev, remaining);\n        if (usbEnabled) {\n            (function(sendMs) {\n                setTimeout(function() {\n                    if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n                    node.send([null, null, null, {payload: '{\"state_1\":\"off\"}'}]);\n                    setTimeout(function() {\n                        node.send([null, null, null, {payload: '{\"state_1\":\"on\"}'}]);\n                    }, 5000);\n                }, Math.max(0, sendMs - 60000 - now));\n            })(ev.at);\n        }\n        if (ev.cmd === 'stop') { pendingStop = ev.at; }\n        else { pendingStart = {cmd: ev.cmd, at: ev.at}; }\n        recovered.push(ev.cmd + ' @ ' + new Date(ev.at).toTimeString().slice(0,5));\n    } else if (remaining > -FIVE_MIN) {\n        node.send([{payload: ev.cmd}, {payload: '✅ Inviato (in ritardo, da file): ' + ev.cmd}, null, null]);\n        recovered.push(ev.cmd + ' (in ritardo)');\n    } else {\n        lateWarnings.push(ev.cmd + ' saltato (>' + Math.round(-remaining/60000) + ' min di ritardo)');\n        expired.push(ev);\n    }\n}\n\nif (pendingStart) { flow.set('pendingCmd', pendingStart.cmd); flow.set('pendingSendMs', pendingStart.at); }\nif (pendingStop) { flow.set('pendingStopMs', pendingStop); }\n\nvar statusParts = [];\nif (recovered.length) statusParts.push('⏳ Ripristinati: ' + recovered.join(', '));\nif (lateWarnings.length) statusParts.push('⚠️ ' + lateWarnings.join(' | '));\nif (statusParts.length === 0) statusParts.push('ℹ️ File eventi vuoto o già scaduto');\nnode.send([null, {payload: statusParts.join(' — ')}, null, null]);\n\n// Se ci sono eventi scaduti ma altri ancora validi, riscrivi il file senza quelli scaduti\nif (expired.length && (pendingStart || pendingStop)) {\n    var remaining_events = data.events.filter(function(ev) {\n        return (ev.at - now) > -FIVE_MIN;\n    });\n    node.send([null, null, {payload: JSON.stringify({events: remaining_events})}, null]);\n} else if (expired.length && !pendingStart && !pendingStop) {\n    node.send([null, null, {payload: '{\"events\":[]}'}, null]);\n}\n",
+    "func": "var content = msg.payload || '{}';\nvar data;\ntry { data = JSON.parse(content); } catch(e) { return null; }\nif (!data.events || !Array.isArray(data.events) || data.events.length === 0) return null;\n\nvar now = Date.now();\nvar FIVE_MIN = 5 * 60 * 1000;\nvar usbEnabled = flow.get('usbCycleEnabled') || false;\n\nflow.set('pendingCancelled', false);\nvar schedId = Date.now();\nflow.set('pendingSchedId', schedId);\nflow.set('pendingProg7Ms', null);\nflow.set('pendingProg7Cmd', null);\n\n// Split events by kind and by time, keeping only future ones\nvar futureStarts = [];\nvar futureStop = null;\nvar recovered = [];\nvar lateWarnings = [];\nvar expired = [];\n\nfor (var i = 0; i < data.events.length; i++) {\n    var ev = data.events[i];\n    if (!ev.cmd || !ev.at) continue;\n    var remaining = ev.at - now;\n    if (remaining > 0) {\n        (function(ev, remaining) {\n            setTimeout(function() {\n                if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n                if (ev.cmd === 'stop') { flow.set('pendingStopMs', null); }\n                else if (ev.cmd === flow.get('pendingProg7Cmd') && ev.at === flow.get('pendingProg7Ms')) {\n                    flow.set('pendingProg7Ms', null); flow.set('pendingProg7Cmd', null);\n                } else {\n                    flow.set('pendingSendMs', null); flow.set('pendingCmd', null);\n                }\n                node.send([{payload: ev.cmd}, {payload: '✅ Inviato (da file): ' + ev.cmd}, null, null]);\n            }, remaining);\n        })(ev, remaining);\n        if (usbEnabled) {\n            (function(sendMs) {\n                setTimeout(function() {\n                    if (flow.get('pendingCancelled') || flow.get('pendingSchedId') !== schedId) return;\n                    node.send([null, null, null, {payload: '{\"state_1\":\"off\"}'}]);\n                    setTimeout(function() {\n                        node.send([null, null, null, {payload: '{\"state_1\":\"on\"}'}]);\n                    }, 5000);\n                }, Math.max(0, sendMs - 60000 - now));\n            })(ev.at);\n        }\n        if (ev.cmd === 'stop') { futureStop = ev.at; }\n        else { futureStarts.push({cmd: ev.cmd, at: ev.at}); }\n        recovered.push(ev.cmd + ' @ ' + new Date(ev.at).toTimeString().slice(0,5));\n    } else if (remaining > -FIVE_MIN) {\n        node.send([{payload: ev.cmd}, {payload: '✅ Inviato (in ritardo, da file): ' + ev.cmd}, null, null]);\n        recovered.push(ev.cmd + ' (in ritardo)');\n    } else {\n        lateWarnings.push(ev.cmd + ' saltato (>' + Math.round(-remaining/60000) + ' min di ritardo)');\n        expired.push(ev);\n    }\n}\n\n// Sort future starts by time. Earliest = prog 7 (if there is more than one start), latest = prog 1.\nfutureStarts.sort(function(a, b) { return a.at - b.at; });\nif (futureStarts.length >= 2) {\n    flow.set('pendingProg7Cmd', futureStarts[0].cmd);\n    flow.set('pendingProg7Ms', futureStarts[0].at);\n    flow.set('pendingCmd', futureStarts[futureStarts.length - 1].cmd);\n    flow.set('pendingSendMs', futureStarts[futureStarts.length - 1].at);\n} else if (futureStarts.length === 1) {\n    flow.set('pendingCmd', futureStarts[0].cmd);\n    flow.set('pendingSendMs', futureStarts[0].at);\n}\nif (futureStop) { flow.set('pendingStopMs', futureStop); }\n\nvar statusParts = [];\nif (recovered.length) statusParts.push('⏳ Ripristinati: ' + recovered.join(', '));\nif (lateWarnings.length) statusParts.push('⚠️ ' + lateWarnings.join(' | '));\nif (statusParts.length === 0) statusParts.push('ℹ️ File eventi vuoto o già scaduto');\nnode.send([null, {payload: statusParts.join(' — ')}, null, null]);\n\nif (expired.length && (futureStarts.length || futureStop)) {\n    var remaining_events = data.events.filter(function(ev) {\n        return (ev.at - now) > -FIVE_MIN;\n    });\n    node.send([null, null, {payload: JSON.stringify({events: remaining_events})}, null]);\n} else if (expired.length && !futureStarts.length && !futureStop) {\n    node.send([null, null, {payload: '{\"events\":[]}'}, null]);\n}\n",
     "outputs": 4,
     "noerr": 0,
     "wires": [

@@ -9,7 +9,8 @@ Remote control for an **ECG PCB 82120** bread machine via a Raspberry Pi, Node-R
 - Start baking programs remotely from a smartphone
 - Schedule bread to be **ready at a specific time** without manual intervention
 - Chain **Program 7 (Dough)** immediately followed by **Program 1 (Bread)** at a set time, without needing to be present when the dough program finishes
-- Automatically **stop the machine** when the bread is ready, disabling the unnecessary one-hour keep-warm phase
+- Insert a **user-defined rest phase** between kneading and baking, so that the dough can develop over many hours (e.g. overnight cold ferment for a total lead time of 18 h or more) without the excessively long rise that would produce an over-acidic loaf
+- Automatically **stop the machine** when the bread is ready, disabling the one-hour keep-warm phase that would otherwise dry out the crust
 
 ---
 
@@ -40,7 +41,7 @@ Node-RED Dashboard  (Raspberry Pi)
     |  MQTT  breadmachine/cmd
     v
 Pico W
-    |  GPIO -> 330 ohm -> PC817C LED
+    |  GPIO -> 470 ohm -> PC817C LED
     v
 PC817C phototransistor in parallel with button contacts
     |
@@ -64,7 +65,7 @@ The two programs used are:
 | Raspberry Pi | 1 | Runs Node-RED + Mosquitto |
 | Raspberry Pi Pico W | 1 | MicroPython firmware |
 | PC817C optocoupler (DIP-4) | 6 | One per button |
-| Resistor 330 ohm | 6 | LED current limiting, Pico GPIO side |
+| Resistor 470 ohm | 6 | LED current limiting, Pico GPIO side |
 | Sub-D 9 female connector | 1 | On the PCB inside the enclosure |
 | Sub-D 9 male connector | 1 | On the cable going to the bread machine |
 | Perfboard | 1 | ~5 x 7 cm |
@@ -123,7 +124,7 @@ One PC817C per button. The LED side is driven by the Pico W GPIO; the phototrans
 ```
 Pico W GPIO (3.3 V)
        |
-     [330 ohm]
+     [470 ohm]
        |
    PC817C pin 1  (Anode)
    PC817C pin 2  (Cathode) -- GND (Pico)
@@ -135,7 +136,7 @@ Pico W GPIO (3.3 V)
 **Resistor calculation:**
 
 ```
-R = (3.3 V - 1.2 V) / 10 mA = 210 ohm  ->  330 ohm is fine as well
+R = (3.3 V - 1.2 V) / 10 mA = 210 ohm  ->  use 470 ohm (conservative, ~4.5 mA)
 ```
 
 The phototransistor switches the ~25-250 uA pull-up current of the machine's MCU, well within PC817C ratings.
@@ -158,7 +159,7 @@ The Pico W and optocoupler board are housed in a small plastic enclosure connect
 
 ![Enclosure interior](images/08_enclosure.jpg)
 
-*Inside the enclosure: Pico W (top), perfboard with 6x PC817C and 6x 330 ohm resistors (centre), Sub-D 9 female connector (bottom-left).*
+*Inside the enclosure: Pico W (top), perfboard with 6x PC817C and 6x 470 ohm resistors (centre), Sub-D 9 female connector (bottom-left).*
 
 ---
 
@@ -236,23 +237,35 @@ The dashboard (at `http://<raspberry-pi-ip>:1880/ui`) provides:
 | Element | Function |
 |---------|----------|
 | Pronto alle (HH:MM) | Target ready time input |
+| Tempo di riposo (min) | Rest time between end of Prog 7 and start of Prog 1 (used only by the delayed-Prog-7 button) |
 | Power cycle USB toggle | Enable/disable optional USB power cycling |
 | Prog 7 - Impasto (ora) | Start Program 7 immediately |
 | Prog 1 - Pane (programmato) | Start Program 1 at the target time |
-| Prog 7 ora + Prog 1 programmato | Start Program 7 now, Program 1 at target time |
+| Prog 7 ora + Prog 1 programmato | Start Program 7 now, Program 1 at target time (dough sits in the machine until Prog 1 starts) |
+| Prog 7 ritardato + Prog 1 programmato | Schedule both programs so that the dough rests exactly the requested time between the end of Prog 7 and the start of Prog 1 |
 | Ferma macchina | Send stop to bread machine immediately |
-| Annulla comando in attesa | Cancel any pending scheduled command |
+| Annulla comando in attesa | Cancel any pending scheduled command and clear the pending file |
 | Stato | Live status and countdown display |
 
 ### Timing logic
 
-When a timed button is pressed, Node-RED:
+When any of the timed buttons is pressed, Node-RED:
 
-1. Validates that enough time remains before the target (at least 3 h 16 m for Prog 1 alone, at least 3 h 31 m for Prog 7 + Prog 1)
-2. Calculates when to send the start command: `target_time - 196 min`
-3. Writes the full event list (start + stop) to `/home/pi/breadmachine_pending.json`
-4. Sleeps until the send time, then publishes the MQTT start command
-5. Schedules a stop command 3 minutes after the target time
+1. Validates that enough time remains before the target
+2. Calculates when to send each command
+3. Writes the full event list (all starts + stop) to `/home/pi/breadmachine_pending.json`
+4. Schedules each command with `setTimeout`
+5. Schedules the stop 3 minutes after the target time
+
+Per-button behaviour:
+
+- **Prog 1 programmato**: start at `target - 196 min`; requires at least 3 h 16 m ahead
+- **Prog 7 ora + Prog 1 programmato**: Prog 7 immediately, Prog 1 at `target - 196 min`; requires at least 3 h 31 m ahead
+- **Prog 7 ritardato + Prog 1 programmato**:
+    - Prog 1 at `target - 196 min`
+    - Prog 7 at `target - 196 - rest - 15 min` (accounting for its own 15 min duration)
+    - If that ideal Prog 7 start is in the past, Prog 7 starts immediately and a warning shows the actual (shorter) rest time
+    - Requires at least 3 h 31 m ahead; below that the button aborts with a warning
 
 ### File-based persistence
 
@@ -261,25 +274,26 @@ All scheduled events are persisted to `/home/pi/breadmachine_pending.json` in th
 ```json
 {
   "events": [
-    {"cmd": "start:1:1250g:dark:", "at": 1710000000000},
-    {"cmd": "stop",                "at": 1710011700000}
+    {"cmd": "start:7:::",           "at": 1710000000000},
+    {"cmd": "start:1:1250g:dark:",  "at": 1710004500000},
+    {"cmd": "stop",                 "at": 1710015900000}
   ]
 }
 ```
 
-This makes the system fully resilient to reboots — including the daily 03:00 restart. On every startup, a startup inject fires 30 s after boot, reads the file, and:
+This makes the system fully resilient to reboots, including the daily 03:00 restart. On every startup, a startup inject fires 30 s after boot, reads the file, and:
 
 - If an event time is in the **future**: reschedules it (including its power cycle if enabled)
 - If an event time is within **5 minutes in the past**: sends the command immediately
 - If **older than 5 minutes**: shows a warning on the dashboard and skips it
 
-The file is updated on every scheduling action, cleared when the current schedule completes normally, and cleared by the stop/kill buttons.
+The file is updated on every scheduling action, cleared when the schedule completes normally, and cleared by the Stop and Kill buttons.
 
 ### USB power cycle (optional)
 
 When the Power cycle USB toggle is ON and a Zigbee USB switch is connected to the Pico W USB port:
 
-- 1 minute before each scheduled command (start and stop): the Pico is power-cycled (off for 5 s, then on)
+- 1 minute before each scheduled command (Prog 7, Prog 1, and stop): the Pico is power-cycled (off for 5 s, then on)
 
 This ensures a fresh connection before each critical command. The 1 minute after re-power gives the Pico time to complete boot, connect to WiFi and re-subscribe to MQTT (hence the 196-minute figure used for Program 1 duration, which includes a 1-minute boot margin). When disabled the flow behaves identically to a setup without the USB switch.
 
@@ -338,7 +352,7 @@ This ensures a fresh connection before each critical command. The 1 minute after
 
 ## 9. Known Limitations and Notes
 
-**Program timings are hardcoded.** The 196-minute duration for Program 1 (195 min actual + 1 min Pico boot margin when using USB power cycle) and 15 minutes for Program 7 are fixed in the Node-RED function nodes. Adjust `PROG1_MS` and `PROG7_MS` in the BTN2 and BTN3 function nodes if your machine differs.
+**Program timings are hardcoded.** The 196-minute duration for Program 1 (195 min actual + 1 min Pico boot margin when using USB power cycle) and 15 minutes for Program 7 are fixed in the Node-RED function nodes. Adjust `PROG1_MS` and `PROG7_MS` in the function nodes if your machine differs.
 
 **Node-RED linter warning.** The function nodes may show a red triangle in the editor when opened and closed without changes. This is a false positive from the ACE editor linter, which flags `node.send()` calls inside nested `setTimeout` closures. The code passes JavaScript syntax validation and works correctly at runtime.
 

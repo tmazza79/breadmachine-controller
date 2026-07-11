@@ -211,7 +211,7 @@ start:<prog>:<loaf>:<color>:<delay>
 - `prog`: number of MENU presses
 - `loaf`: cycles LOAF SIZE to 750g / 1000g / 1250g
 - `color`: cycles COLOR to lower / medium / dark / rapid
-- `delay`: each press adds 10 min (first press adds 5 min)
+- `delay`: each press adds 10 min (first press adds 5 min). Currently unused by the Node-RED flow, kept for firmware backward compatibility.
 - Fields can be empty to skip (e.g. `start:7:::` uses all defaults)
 
 `stop`: holds START/STOP for 2 s to interrupt any running program.
@@ -250,24 +250,38 @@ When a timed button is pressed, Node-RED:
 
 1. Validates that enough time remains before the target (at least 3 h 16 m for Prog 1 alone, at least 3 h 31 m for Prog 7 + Prog 1)
 2. Calculates when to send the start command: `target_time - 196 min`
-3. If that send time falls after 03:00, applies **rescue mode**: sends the command before 02:59 with a bread machine delay, so the machine waits autonomously through the 03:00 system reset
-4. Writes the scheduled stop time to `/home/pi/breadmachine_pending.json`
-5. Sleeps until the send time, then publishes the MQTT start command
-6. Schedules a stop command 3 minutes after the target time
+3. Writes the full event list (start + stop) to `/home/pi/breadmachine_pending.json`
+4. Sleeps until the send time, then publishes the MQTT start command
+5. Schedules a stop command 3 minutes after the target time
 
-On every restart, a startup inject fires 30 s after boot, reads the pending file, and:
-- If a stop time is in the future: reschedules it
-- If a stop time is within 30 min in the past: sends stop immediately (keep-warm phase)
-- If older than 30 min: ignores and clears the file
+### File-based persistence
+
+All scheduled events are persisted to `/home/pi/breadmachine_pending.json` in the following format:
+
+```json
+{
+  "events": [
+    {"cmd": "start:1:1250g:dark:", "at": 1710000000000},
+    {"cmd": "stop",                "at": 1710011700000}
+  ]
+}
+```
+
+This makes the system fully resilient to reboots — including the daily 03:00 restart. On every startup, a startup inject fires 30 s after boot, reads the file, and:
+
+- If an event time is in the **future**: reschedules it (including its power cycle if enabled)
+- If an event time is within **5 minutes in the past**: sends the command immediately
+- If **older than 5 minutes**: shows a warning on the dashboard and skips it
+
+The file is updated on every scheduling action, cleared when the current schedule completes normally, and cleared by the stop/kill buttons.
 
 ### USB power cycle (optional)
 
 When the Power cycle USB toggle is ON and a Zigbee USB switch is connected to the Pico W USB port:
 
-- 1 minute before the start command: Pico is power-cycled (off for 5 s, then on)
-- 1 minute before the stop command: same power cycle
+- 1 minute before each scheduled command (start and stop): the Pico is power-cycled (off for 5 s, then on)
 
-This ensures a fresh connection before each critical command. When disabled the flow behaves identically to a setup without the USB switch.
+This ensures a fresh connection before each critical command. The 1 minute after re-power gives the Pico time to complete boot, connect to WiFi and re-subscribe to MQTT (hence the 196-minute figure used for Program 1 duration, which includes a 1-minute boot margin). When disabled the flow behaves identically to a setup without the USB switch.
 
 ### MQTT topics
 
@@ -325,10 +339,6 @@ This ensures a fresh connection before each critical command. When disabled the 
 ## 9. Known Limitations and Notes
 
 **Program timings are hardcoded.** The 196-minute duration for Program 1 (195 min actual + 1 min Pico boot margin when using USB power cycle) and 15 minutes for Program 7 are fixed in the Node-RED function nodes. Adjust `PROG1_MS` and `PROG7_MS` in the BTN2 and BTN3 function nodes if your machine differs.
-
-**Bread machine delay granularity.** The first `+` press adds 5 minutes; each subsequent press adds 10 minutes. Node-RED rounds up to the nearest achievable value when using rescue mode.
-
-**Maximum schedulable delay.** The bread machine caps total process time at 15 hours. For Program 1 this means a maximum added delay of 704 minutes. Targets beyond this range are rejected with a warning on the dashboard.
 
 **Node-RED linter warning.** The function nodes may show a red triangle in the editor when opened and closed without changes. This is a false positive from the ACE editor linter, which flags `node.send()` calls inside nested `setTimeout` closures. The code passes JavaScript syntax validation and works correctly at runtime.
 
